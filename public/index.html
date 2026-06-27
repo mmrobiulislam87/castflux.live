@@ -3,20 +3,25 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Live TV — বাংলা & বিশ্ব</title>
+  <title>CastFlux Live — বাংলা & বিশ্ব</title>
+  <meta name="description" content="CastFlux Live — free live TV. Football, Cricket, Bangla & world channels." />
+  <meta property="og:title" content="CastFlux Live" />
+  <meta property="og:description" content="Watch live TV instantly — sports, news, Bangla & more." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect fill='%23e85d04' width='32' height='32' rx='6'/%3E%3Ctext x='16' y='22' text-anchor='middle' fill='white' font-size='18' font-family='sans-serif'%3E%E2%96%B6%3C/text%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/style.css?v=4" />
+  <link rel="stylesheet" href="/css/style.css?v=5" />
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
 </head>
 <body>
-  <div class="bg-blur"></div>
+  <div class="bg-blur" id="bgBlur"></div>
 
   <div class="shell">
-    <!-- Left: Player -->
     <section class="player-panel">
-      <div class="player-frame">
+      <div class="player-frame" id="playerFrame">
+        <div class="ambient-glow" id="ambientGlow" aria-hidden="true"></div>
         <video id="videoPlayer" controls playsinline autoplay muted preload="auto"></video>
 
         <div class="player-overlay" id="playerOverlay">
@@ -26,8 +31,15 @@
           </div>
         </div>
 
+        <div class="gesture-hint" id="gestureHint" aria-hidden="true"></div>
         <div class="player-status" id="playerStatus"></div>
         <div class="quality-badge" id="qualityBadge"></div>
+
+        <div class="player-toolbar">
+          <button type="button" class="pt-btn" id="favoriteBtn" title="Favorite (S)">☆</button>
+          <button type="button" class="pt-btn" id="audioOnlyBtn" title="Audio only">🎧</button>
+          <button type="button" class="pt-btn" id="fullscreenBtn" title="Fullscreen (F)">⛶</button>
+        </div>
 
         <div class="player-info">
           <span class="live-badge"><i></i> LIVE</span>
@@ -37,7 +49,6 @@
       </div>
     </section>
 
-    <!-- Right: Channel Guide -->
     <aside class="guide-panel">
       <div class="guide-carousel-wrap">
         <button type="button" class="carousel-arrow" id="carouselPrev" aria-label="Previous">‹</button>
@@ -47,6 +58,11 @@
 
       <div class="guide-search">
         <input type="search" id="searchInput" placeholder="চ্যানেল খুঁজুন..." autocomplete="off" />
+      </div>
+
+      <div class="guide-toolbar">
+        <button type="button" class="toolbar-btn" id="surpriseBtn" title="Random channel">🎲 Surprise Me</button>
+        <button type="button" class="toolbar-btn" id="favoritesTabBtn" title="My favorites">★ Favorites</button>
       </div>
 
       <div class="channel-grid" id="channelList"></div>
@@ -60,13 +76,27 @@
       </footer>
 
       <div class="settings-drawer" id="settingsPanel">
-        <label>Quality
+        <label>Buffer mode
           <select id="bandwidthMode">
             <option value="auto">Smooth (Recommended)</option>
             <option value="medium">Standard</option>
             <option value="low">Data Saver</option>
           </select>
         </label>
+        <label>Resolution
+          <select id="manualQuality">
+            <option value="-1">Auto</option>
+          </select>
+        </label>
+        <label class="toggle-row">
+          <span>Ambient glow</span>
+          <input type="checkbox" id="ambientToggle" checked />
+        </label>
+        <label class="toggle-row">
+          <span>Audio-only mode</span>
+          <input type="checkbox" id="audioOnlyToggle" />
+        </label>
+        <p class="settings-hint">⌨️ ↑↓ volume · ←→ channel · F fullscreen · M mute · S favorite</p>
         <button type="button" class="drawer-btn" id="adminToggle">+ Add Channel</button>
       </div>
     </aside>
@@ -96,6 +126,6 @@
     </form>
   </dialog>
 
-  <script src="/js/app.js?v=6"></script>
+  <script src="/js/app.js?v=7"></script>
 </body>
 </html>

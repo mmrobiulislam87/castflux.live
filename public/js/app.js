@@ -7,6 +7,10 @@
   const PRELOAD_CONCURRENCY = 2;
   const WELCOME_PREFETCH = 3;
   const WELCOME_WAIT_MS = 8000;
+  const LS_FAV = 'castflux_favorites';
+  const LS_RECENT = 'castflux_recent';
+  const LS_PREFS = 'castflux_prefs';
+  const MAX_RECENT = 20;
 
   /** Menu order — special categories first */
   const PRIORITY_GROUPS = [
@@ -48,6 +52,13 @@
   let lastProgressTime = 0;
   let playbackStarted = false;
   let welcomeAutoplay = false;
+  let favoriteIds = [];
+  let recentIds = [];
+  let audioOnlyMode = false;
+  let ambientEnabled = true;
+  let manualQuality = -1;
+  let ambientRaf = null;
+  let gestureTouch = null;
 
   const els = {
     channelList: document.getElementById('channelList'),
@@ -70,6 +81,18 @@
     addModal: document.getElementById('addChannelModal'),
     addForm: document.getElementById('addChannelForm'),
     cancelAdd: document.getElementById('cancelAdd'),
+    playerFrame: document.getElementById('playerFrame'),
+    ambientGlow: document.getElementById('ambientGlow'),
+    bgBlur: document.getElementById('bgBlur'),
+    favoriteBtn: document.getElementById('favoriteBtn'),
+    audioOnlyBtn: document.getElementById('audioOnlyBtn'),
+    fullscreenBtn: document.getElementById('fullscreenBtn'),
+    gestureHint: document.getElementById('gestureHint'),
+    surpriseBtn: document.getElementById('surpriseBtn'),
+    favoritesTabBtn: document.getElementById('favoritesTabBtn'),
+    manualQuality: document.getElementById('manualQuality'),
+    ambientToggle: document.getElementById('ambientToggle'),
+    audioOnlyToggle: document.getElementById('audioOnlyToggle'),
   };
 
   const preloadPool = new Map();
@@ -364,6 +387,16 @@
   function buildMenuItems() {
     const items = [];
 
+    const favCount = getFavoriteChannels().length;
+    if (favCount > 0) {
+      items.push({ type: 'favorites', value: 'all', label: '★ Favorites', count: favCount });
+    }
+
+    const recentCount = getRecentChannels().length;
+    if (recentCount > 0) {
+      items.push({ type: 'recent', value: 'all', label: '🕐 Recent', count: recentCount });
+    }
+
     for (const { value, label } of PRIORITY_GROUPS) {
       const count = countByBucket(value);
       if (count > 0) items.push({ type: 'group', value, label, count });
@@ -426,7 +459,11 @@
     const { type, value } = filter;
     let pool;
 
-    if (type === 'group') {
+    if (type === 'favorites') {
+      pool = getFavoriteChannels();
+    } else if (type === 'recent') {
+      pool = getRecentChannels();
+    } else if (type === 'group') {
       pool = allChannels.filter((c) => c._bucket === value);
     } else if (type === 'country') {
       pool = allChannels.filter((c) => c.country === value && c._bucket === 'English');
@@ -436,6 +473,7 @@
       pool = allChannels;
     }
 
+    if (type === 'favorites' || type === 'recent') return pool;
     return sortChannels(pool);
   }
 
@@ -467,6 +505,280 @@
         preloadFilterTop({ type: 'group', value }, 2);
       }
     }
+  }
+
+  // ── Favorites, recent & user prefs (localStorage) ──
+
+  function loadUserData() {
+    try {
+      favoriteIds = JSON.parse(localStorage.getItem(LS_FAV) || '[]');
+      recentIds = JSON.parse(localStorage.getItem(LS_RECENT) || '[]');
+      const prefs = JSON.parse(localStorage.getItem(LS_PREFS) || '{}');
+      audioOnlyMode = !!prefs.audioOnly;
+      ambientEnabled = prefs.ambient !== false;
+      manualQuality = prefs.manualQuality ?? -1;
+      if (els.ambientToggle) els.ambientToggle.checked = ambientEnabled;
+      if (els.audioOnlyToggle) els.audioOnlyToggle.checked = audioOnlyMode;
+      if (els.manualQuality && manualQuality >= 0) {
+        els.manualQuality.value = String(manualQuality);
+      }
+    } catch {
+      favoriteIds = [];
+      recentIds = [];
+    }
+    applyAudioOnlyUi();
+    applyAmbientUi();
+  }
+
+  function savePrefs() {
+    localStorage.setItem(LS_PREFS, JSON.stringify({
+      audioOnly: audioOnlyMode,
+      ambient: ambientEnabled,
+      manualQuality,
+    }));
+  }
+
+  function saveFavorites() {
+    localStorage.setItem(LS_FAV, JSON.stringify(favoriteIds));
+  }
+
+  function isFavorite(id) {
+    return favoriteIds.includes(Number(id));
+  }
+
+  function toggleFavorite(id) {
+    const nid = Number(id);
+    const idx = favoriteIds.indexOf(nid);
+    if (idx >= 0) favoriteIds.splice(idx, 1);
+    else favoriteIds.unshift(nid);
+    saveFavorites();
+    updateFavoriteBtn();
+    renderCarousel();
+    if (activeFilter.type === 'favorites') renderGrid();
+    else document.querySelectorAll(`.tile-fav[data-fav-id="${nid}"]`).forEach((btn) => {
+      btn.classList.toggle('on', isFavorite(nid));
+    });
+    showStatus(isFavorite(nid) ? '★ Saved to Favorites' : 'Removed from Favorites', 'ok');
+  }
+
+  function addRecent(id) {
+    const nid = Number(id);
+    recentIds = recentIds.filter((x) => x !== nid);
+    recentIds.unshift(nid);
+    if (recentIds.length > 24) recentIds = recentIds.slice(0, 24);
+    localStorage.setItem(LS_RECENT, JSON.stringify(recentIds));
+  }
+
+  function channelsByIds(ids) {
+    const map = new Map(allChannels.map((c) => [c.id, c]));
+    return ids.map((id) => map.get(id)).filter(Boolean);
+  }
+
+  function getFavoriteChannels() {
+    return channelsByIds(favoriteIds);
+  }
+
+  function getRecentChannels() {
+    return channelsByIds(recentIds);
+  }
+
+  function updateFavoriteBtn() {
+    if (!els.favoriteBtn || !currentChannel) return;
+    const on = isFavorite(currentChannel.id);
+    els.favoriteBtn.textContent = on ? '★' : '☆';
+    els.favoriteBtn.classList.toggle('active', on);
+    els.favoriteBtn.title = on ? 'Remove favorite (S)' : 'Add to favorites (S)';
+  }
+
+  function showChannelSkeleton() {
+    if (!els.channelList) return;
+    els.channelList.innerHTML = `<div class="skeleton-grid">${Array.from({ length: 12 }, () => '<div class="skeleton-tile"></div>').join('')}</div>`;
+  }
+
+  function applyAudioOnlyUi() {
+    els.playerFrame?.classList.toggle('audio-only', audioOnlyMode);
+    els.audioOnlyBtn?.classList.toggle('active', audioOnlyMode);
+    if (audioOnlyMode && hlsInstance?.levels?.length) {
+      hlsInstance.currentLevel = 0;
+    }
+  }
+
+  function applyAmbientUi() {
+    els.playerFrame?.classList.toggle('ambient-on', ambientEnabled);
+    if (ambientEnabled && playbackStarted) startAmbientLoop();
+    else stopAmbientLoop();
+  }
+
+  function applyManualQuality(hls) {
+    if (!hls?.levels?.length || manualQuality < 0) return;
+    const max = hls.levels.length - 1;
+    hls.currentLevel = Math.min(manualQuality, max);
+  }
+
+  function populateQualitySelect(hls) {
+    if (!els.manualQuality || !hls?.levels?.length) return;
+    const cur = manualQuality;
+    els.manualQuality.innerHTML = '<option value="-1">Auto</option>';
+    hls.levels.forEach((lv, i) => {
+      const label = lv.height ? `${lv.height}p` : `Level ${i + 1}`;
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = label;
+      els.manualQuality.appendChild(opt);
+    });
+    els.manualQuality.value = String(cur >= 0 ? Math.min(cur, hls.levels.length - 1) : -1);
+  }
+
+  function startAmbientLoop() {
+    stopAmbientLoop();
+    if (!ambientEnabled || !els.video) return;
+    const sample = () => {
+      if (!ambientEnabled || !playbackStarted || els.video.paused) {
+        ambientRaf = requestAnimationFrame(sample);
+        return;
+      }
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 8;
+        canvas.height = 8;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(els.video, 0, 0, 8, 8);
+        const d = ctx.getImageData(0, 0, 8, 8).data;
+        let r = 0; let g = 0; let b = 0; let n = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          r += d[i]; g += d[i + 1]; b += d[i + 2]; n += 1;
+        }
+        const color = `rgb(${Math.round(r / n)}, ${Math.round(g / n)}, ${Math.round(b / n)})`;
+        els.playerFrame?.style.setProperty('--ambient-color', color);
+        els.bgBlur?.style.setProperty('--ambient-color', color);
+      } catch { /* CORS tainted canvas */ }
+      ambientRaf = requestAnimationFrame(sample);
+    };
+    ambientRaf = requestAnimationFrame(sample);
+  }
+
+  function stopAmbientLoop() {
+    if (ambientRaf) cancelAnimationFrame(ambientRaf);
+    ambientRaf = null;
+  }
+
+  function showGestureHint(text, side = 'vol') {
+    if (!els.gestureHint) return;
+    els.gestureHint.textContent = text;
+    els.gestureHint.className = `gesture-hint visible ${side}`;
+    clearTimeout(els.gestureHint._t);
+    els.gestureHint._t = setTimeout(() => {
+      els.gestureHint.classList.remove('visible');
+    }, 900);
+  }
+
+  function surpriseMe() {
+    const pool = allChannels.filter((c) => isFastChannel(c) || isPreloaded(c));
+    const pick = pool[Math.floor(Math.random() * pool.length)]
+      || allChannels[Math.floor(Math.random() * allChannels.length)];
+    if (pick) {
+      welcomeAutoplay = false;
+      tryUnmute();
+      playChannel(pick);
+      showStatus(`🎲 ${pick.name}`, 'ok');
+    }
+  }
+
+  function hopChannel(dir) {
+    const list = getFilteredChannels();
+    if (!list.length || !currentChannel) return;
+    const idx = list.findIndex((c) => c.id === currentChannel.id);
+    const next = list[(idx + dir + list.length) % list.length];
+    if (next) {
+      welcomeAutoplay = false;
+      tryUnmute();
+      playChannel(next);
+    }
+  }
+
+  function toggleFullscreen() {
+    const target = els.playerFrame || els.video;
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else target.requestFullscreen?.().catch(() => {});
+  }
+
+  function setupPlayerGestures() {
+    const frame = els.playerFrame;
+    if (!frame) return;
+
+    frame.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      const rect = frame.getBoundingClientRect();
+      const x = e.touches[0].clientX - rect.left;
+      gestureTouch = {
+        x,
+        y: e.touches[0].clientY,
+        side: x > rect.width / 2 ? 'vol' : 'bright',
+        startVol: els.video.volume,
+      };
+    }, { passive: true });
+
+    frame.addEventListener('touchmove', (e) => {
+      if (!gestureTouch || e.touches.length !== 1) return;
+      const dy = gestureTouch.y - e.touches[0].clientY;
+      if (gestureTouch.side === 'vol') {
+        const v = Math.min(1, Math.max(0, gestureTouch.startVol + dy / 200));
+        els.video.volume = v;
+        showGestureHint(`🔊 ${Math.round(v * 100)}%`, 'vol');
+      } else {
+        showGestureHint(`☀ ${Math.min(100, Math.max(0, 50 + dy / 3))}%`, 'bright');
+      }
+    }, { passive: true });
+
+    frame.addEventListener('touchend', () => { gestureTouch = null; }, { passive: true });
+  }
+
+  function setupKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+      if (e.target.matches('input, textarea, select, button')) {
+        if (e.target.id !== 'videoPlayer') return;
+      }
+      switch (e.key) {
+        case 'ArrowUp':
+          e.preventDefault();
+          els.video.volume = Math.min(1, els.video.volume + 0.08);
+          showGestureHint(`🔊 ${Math.round(els.video.volume * 100)}%`, 'vol');
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          els.video.volume = Math.max(0, els.video.volume - 0.08);
+          showGestureHint(`🔊 ${Math.round(els.video.volume * 100)}%`, 'vol');
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          hopChannel(1);
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          hopChannel(-1);
+          break;
+        case 'f':
+        case 'F':
+          e.preventDefault();
+          toggleFullscreen();
+          break;
+        case 'm':
+        case 'M':
+          e.preventDefault();
+          els.video.muted = !els.video.muted;
+          showStatus(els.video.muted ? 'Muted' : 'Unmuted', 'ok');
+          break;
+        case 's':
+        case 'S':
+          if (currentChannel) {
+            e.preventDefault();
+            toggleFavorite(currentChannel.id);
+          }
+          break;
+        default:
+          break;
+      }
+    });
   }
 
   function computeCountryCounts() {
@@ -673,18 +985,25 @@
     updateRailCount();
 
     if (!list.length) {
-      els.channelList.innerHTML = '<div class="empty-state">কোনো চ্যানেল নেই — ⟳ Sync চাপুন</div>';
+      const msg = activeFilter.type === 'favorites'
+        ? '★ কোনো favorite নেই — চ্যানেলে ☆ চাপুন'
+        : activeFilter.type === 'recent'
+          ? 'এখনো কোনো চ্যানেল দেখেননি'
+          : 'কোনো চ্যানেল নেই — ⟳ Sync চাপুন';
+      els.channelList.innerHTML = `<div class="empty-state">${msg}</div>`;
       return;
     }
 
     els.channelList.innerHTML = list.map((ch) => {
       const active = currentChannel?.id === ch.id ? ' active' : '';
       const preloaded = preloadPool.get(ch.id)?.readyFlag ? ' preloaded' : '';
+      const favOn = isFavorite(ch.id) ? ' on' : '';
       const initials = escapeHtml(tileInitials(ch.name));
       const logoInner = ch.logo_url
         ? `<img src="${escapeHtml(ch.logo_url)}" alt="" loading="lazy" decoding="async" /><span class="fallback is-hidden">${initials}</span>`
         : `<span class="fallback">${initials}</span>`;
       return `<div class="channel-tile${active}${preloaded}" data-id="${ch.id}" title="${escapeHtml(ch.name)}">
+        <button type="button" class="tile-fav${favOn}" data-fav-id="${ch.id}" aria-label="Favorite">★</button>
         <div class="tile-logo">${logoInner}</div>
         <span class="tile-name">${escapeHtml(ch.name)}</span>
       </div>`;
@@ -699,6 +1018,10 @@
 
     els.channelList.querySelectorAll('.channel-tile').forEach((tile) => {
       const ch = list.find((c) => c.id === Number(tile.dataset.id));
+      tile.querySelector('.tile-fav')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleFavorite(ch.id);
+      });
       tile.addEventListener('mouseenter', () => prefetchUrgent(ch));
       tile.addEventListener('mousedown', () => prefetchUrgent(ch));
       tile.addEventListener('touchstart', () => prefetchUrgent(ch), { passive: true });
@@ -721,7 +1044,8 @@
     els.guideTabs.innerHTML = items.map((item) => {
       const key = filterKey(item);
       const active = key === activeKey ? ' active' : '';
-      const extra = item.type === 'country' ? ' tab-country' : '';
+      const extra = item.type === 'country' ? ' tab-country'
+        : item.type === 'favorites' ? ' tab-favorites' : '';
       return `<button type="button" class="guide-tab${active}${extra}" data-type="${item.type}" data-value="${escapeHtml(item.value)}">
         ${escapeHtml(item.label)}<span class="tab-count">${item.count}</span>
       </button>`;
@@ -765,6 +1089,7 @@
     els.channelName.textContent = ch.name;
     els.channelDesc.textContent = ch.description || `${ch._bucket || 'English'} · ${ch.country || 'INT'}`;
     els.overlay?.classList.add('hidden');
+    updateFavoriteBtn();
   }
 
   function updateQualityBadge() {
@@ -806,11 +1131,16 @@
         }
         updateQualityBadge();
         startBufferHealthWatch();
+        if (ambientEnabled) startAmbientLoop();
+        applyAudioOnlyUi();
         setTimeout(preloadAllCategoryHeads, 5000);
       }
     };
 
     const onParsed = () => {
+      populateQualitySelect(hls);
+      applyManualQuality(hls);
+      if (audioOnlyMode && hls.levels?.length) hls.currentLevel = 0;
       els.video.play().catch(() => {});
       hls.startLoad(-1);
     };
@@ -859,6 +1189,7 @@
       if (hls === hlsInstance) hlsInstance = null;
     }
     stopBufferHealthWatch();
+    stopAmbientLoop();
   }
 
   function swapToPreloaded(cached) {
@@ -884,6 +1215,8 @@
     lastProgressTime = Date.now();
     startBufferHealthWatch();
     schedulePreloadResume();
+    if (ambientEnabled) startAmbientLoop();
+    applyAudioOnlyUi();
   }
 
   async function playChannel(ch) {
@@ -895,6 +1228,7 @@
     streamIndex = 0;
     proxyMode = false;
     playbackStarted = false;
+    addRecent(ch.id);
 
     updateNowPlaying(ch);
     renderGrid();
@@ -972,6 +1306,7 @@
   // ── Data ──
 
   async function loadAll() {
+    showChannelSkeleton();
     const [all, sports] = await Promise.all([
       fetchJSON('/api/channels'),
       fetchJSON('/api/sports'),
@@ -1017,6 +1352,52 @@
     if (currentChannel) playChannel(currentChannel);
   });
 
+  els.favoriteBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (currentChannel) toggleFavorite(currentChannel.id);
+  });
+
+  els.surpriseBtn?.addEventListener('click', () => surpriseMe());
+
+  els.favoritesTabBtn?.addEventListener('click', () => {
+    if (getFavoriteChannels().length) {
+      setActiveFilter({ type: 'favorites', value: 'all' });
+    } else {
+      showStatus('★ প্রথমে চ্যানেল favorite করুন', 'ok');
+    }
+  });
+
+  els.fullscreenBtn?.addEventListener('click', () => toggleFullscreen());
+
+  els.audioOnlyBtn?.addEventListener('click', () => {
+    audioOnlyMode = !audioOnlyMode;
+    if (els.audioOnlyToggle) els.audioOnlyToggle.checked = audioOnlyMode;
+    savePrefs();
+    applyAudioOnlyUi();
+    showStatus(audioOnlyMode ? '🎧 Audio only' : 'Video restored', 'ok');
+  });
+
+  els.audioOnlyToggle?.addEventListener('change', () => {
+    audioOnlyMode = els.audioOnlyToggle.checked;
+    savePrefs();
+    applyAudioOnlyUi();
+  });
+
+  els.ambientToggle?.addEventListener('change', () => {
+    ambientEnabled = els.ambientToggle.checked;
+    savePrefs();
+    applyAmbientUi();
+  });
+
+  els.manualQuality?.addEventListener('change', () => {
+    manualQuality = Number(els.manualQuality.value);
+    savePrefs();
+    if (hlsInstance) applyManualQuality(hlsInstance);
+  });
+
+  setupKeyboardShortcuts();
+  setupPlayerGestures();
+
   els.video?.addEventListener('waiting', () => {
     if (!playbackStarted) return;
     freezeBackgroundPreloads(currentChannel?.id);
@@ -1059,6 +1440,7 @@
   });
 
   async function init() {
+    loadUserData();
     try {
       await loadAll();
       const preferred = ['Football', 'Cricket', 'Sports', 'Bangla'];
