@@ -77,7 +77,6 @@
   let preloadRunning = 0;
   let loadingTimer = null;
   let mainHlsHandlers = null;
-  let resortTimer = null;
   let bufferHealthTimer = null;
   let preloadResumeTimer = null;
 
@@ -258,7 +257,10 @@
   function schedulePreloadResume() {
     clearTimeout(preloadResumeTimer);
     preloadResumeTimer = setTimeout(() => {
-      if (canRunBackgroundPreload()) preloadAllVisible();
+      if (canRunBackgroundPreload()) {
+        preloadAllVisible();
+        preloadAllCategoryHeads();
+      }
     }, 25000);
   }
 
@@ -392,27 +394,36 @@
     return `${f.type}:${f.value}`;
   }
 
+  function isFastChannel(ch) {
+    return ch.source === 'featured' || ch.source === 'bangla';
+  }
+
   function isPreloaded(ch) {
     return !!preloadPool.get(ch.id)?.readyFlag;
   }
 
-  /** ⚡ ready first → featured → name */
+  /** Fast channels always render at top — no DOM reorder after load */
   function sortChannels(list) {
     return [...list].sort((a, b) => {
-      const ar = isPreloaded(a) ? 1 : 0;
-      const br = isPreloaded(b) ? 1 : 0;
-      if (br !== ar) return br - ar;
+      const rank = (c) => {
+        if (isPreloaded(c)) return 3;
+        if (isFastChannel(c)) return 2;
+        if ((c.sort_order || 99) <= 10) return 1;
+        return 0;
+      };
+      const dr = rank(b) - rank(a);
+      if (dr !== 0) return dr;
 
-      const af = a.source === 'featured' || a.source === 'bangla' ? 1 : 0;
-      const bf = b.source === 'featured' || b.source === 'bangla' ? 1 : 0;
-      if (bf !== af) return bf - af;
+      const ao = a.sort_order || 99;
+      const bo = b.sort_order || 99;
+      if (ao !== bo) return ao - bo;
 
       return a.name.localeCompare(b.name);
     });
   }
 
-  function getFilteredChannels() {
-    const { type, value } = activeFilter;
+  function getChannelsForFilter(filter) {
+    const { type, value } = filter;
     let pool;
 
     if (type === 'group') {
@@ -425,25 +436,36 @@
       pool = allChannels;
     }
 
-    const q = els.searchInput?.value.trim().toLowerCase();
-    if (q) pool = pool.filter((c) => c.name.toLowerCase().includes(q));
-
     return sortChannels(pool);
   }
 
-  function resortGridOrder() {
-    if (!els.channelList) return;
-    const sorted = getFilteredChannels();
-    const parent = els.channelList;
-    for (const ch of sorted) {
-      const tile = parent.querySelector(`.channel-tile[data-id="${ch.id}"]`);
-      if (tile) parent.appendChild(tile);
-    }
-    if (els.railCount) {
-      const ready = sorted.filter(isPreloaded).length;
-      els.railCount.textContent = ready
-        ? `${sorted.length} channels · ⚡ ${ready} instant`
-        : `${sorted.length} channels`;
+  function getFilteredChannels() {
+    const q = els.searchInput?.value.trim().toLowerCase();
+    let pool = getChannelsForFilter(activeFilter);
+    if (q) pool = pool.filter((c) => c.name.toLowerCase().includes(q));
+    return pool;
+  }
+
+  function updateRailCount() {
+    if (!els.railCount) return;
+    const list = getFilteredChannels();
+    const ready = list.filter(isPreloaded).length;
+    els.railCount.textContent = ready
+      ? `${list.length} channels · ⚡ ${ready} instant`
+      : `${list.length} channels`;
+  }
+
+  function preloadFilterTop(filter, limit = PRELOAD_MAX) {
+    if (!canRunBackgroundPreload()) return;
+    getChannelsForFilter(filter).slice(0, limit).forEach((ch) => schedulePreload(ch));
+  }
+
+  function preloadAllCategoryHeads() {
+    if (!canRunBackgroundPreload()) return;
+    for (const { value } of PRIORITY_GROUPS) {
+      if (countByBucket(value) > 0) {
+        preloadFilterTop({ type: 'group', value }, 2);
+      }
     }
   }
 
@@ -511,8 +533,7 @@
 
   function markTileReady(id) {
     document.querySelector(`.channel-tile[data-id="${id}"]`)?.classList.add('preloaded');
-    clearTimeout(resortTimer);
-    resortTimer = setTimeout(resortGridOrder, 80);
+    updateRailCount();
   }
 
   function createPreloadEntry(ch, url) {
@@ -649,12 +670,7 @@
 
   function renderGrid() {
     const list = getFilteredChannels();
-    if (els.railCount) {
-      const ready = list.filter(isPreloaded).length;
-      els.railCount.textContent = ready
-        ? `${list.length} channels · ⚡ ${ready} instant`
-        : `${list.length} channels`;
-    }
+    updateRailCount();
 
     if (!list.length) {
       els.channelList.innerHTML = '<div class="empty-state">কোনো চ্যানেল নেই — ⟳ Sync চাপুন</div>';
@@ -693,6 +709,7 @@
       });
     });
 
+    els.channelList.scrollTop = 0;
     preloadAllVisible();
   }
 
@@ -711,6 +728,9 @@
     }).join('');
 
     els.guideTabs.querySelectorAll('.guide-tab').forEach((tab) => {
+      tab.addEventListener('mouseenter', () => {
+        preloadFilterTop({ type: tab.dataset.type, value: tab.dataset.value }, 4);
+      });
       tab.addEventListener('click', () => {
         setActiveFilter({ type: tab.dataset.type, value: tab.dataset.value });
       });
@@ -736,6 +756,7 @@
       t.classList.toggle('active', match);
     });
     scrollActiveTabIntoView();
+    if (!skipPreload) preloadFilterTop(filter, PRELOAD_MAX);
     renderGrid();
     if (!skipPreload) preloadAllVisible();
   }
@@ -785,6 +806,7 @@
         }
         updateQualityBadge();
         startBufferHealthWatch();
+        setTimeout(preloadAllCategoryHeads, 5000);
       }
     };
 
