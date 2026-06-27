@@ -1,15 +1,25 @@
 {
-  "name": "livetv-local",
+  "name": "castflux-live",
   "version": "1.0.0",
-  "description": "Localhost Live TV viewer with legitimate free streams",
+  "description": "CastFlux Live TV — localhost + Cloudflare Workers",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "dev:worker": "wrangler dev",
+    "cf:login": "wrangler login",
+    "cf:d1:create": "wrangler d1 create castflux-db",
+    "cf:migrate:local": "wrangler d1 migrations apply castflux-db --local",
+    "cf:migrate:remote": "wrangler d1 migrations apply castflux-db --remote",
+    "cf:deploy": "wrangler d1 migrations apply castflux-db --remote && wrangler deploy",
+    "deploy": "npm run cf:deploy"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
     "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
   }
 }
