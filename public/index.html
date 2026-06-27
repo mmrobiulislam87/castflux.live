@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Live TV — বাংলা & বিশ্ব</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css?v=3" />
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+</head>
+<body>
+  <div class="bg-blur"></div>
+
+  <div class="shell">
+    <!-- Left: Player -->
+    <section class="player-panel">
+      <div class="player-frame">
+        <video id="videoPlayer" controls playsinline autoplay muted preload="auto"></video>
+
+        <div class="player-overlay" id="playerOverlay">
+          <div class="overlay-msg">
+            <div class="play-icon"></div>
+            <p>ডান পাশ থেকে চ্যানেল বেছে নিন</p>
+          </div>
+        </div>
+
+        <div class="player-status" id="playerStatus"></div>
+        <div class="quality-badge" id="qualityBadge"></div>
+
+        <div class="player-info">
+          <span class="live-badge"><i></i> LIVE</span>
+          <h1 id="channelName">চ্যানেল নির্বাচন করুন</h1>
+          <p id="channelDesc">ক্লিক করলেই সাথে সাথে চলবে</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right: Channel Guide -->
+    <aside class="guide-panel">
+      <div class="guide-carousel-wrap">
+        <button type="button" class="carousel-arrow" id="carouselPrev" aria-label="Previous">‹</button>
+        <nav class="guide-tabs" id="guideTabs"></nav>
+        <button type="button" class="carousel-arrow" id="carouselNext" aria-label="Next">›</button>
+      </div>
+
+      <div class="guide-search">
+        <input type="search" id="searchInput" placeholder="চ্যানেল খুঁজুন..." autocomplete="off" />
+      </div>
+
+      <div class="channel-grid" id="channelList"></div>
+
+      <footer class="guide-footer">
+        <span class="channel-count" id="railCount"></span>
+        <div class="footer-actions">
+          <button type="button" class="foot-btn" id="syncBtn" title="GitHub Sync">⟳</button>
+          <button type="button" class="foot-btn" id="settingsBtn" title="Settings">⚙</button>
+        </div>
+      </footer>
+
+      <div class="settings-drawer" id="settingsPanel">
+        <label>Quality
+          <select id="bandwidthMode">
+            <option value="auto">Auto</option>
+            <option value="low">Data Saver</option>
+            <option value="medium">Standard</option>
+          </select>
+        </label>
+        <button type="button" class="drawer-btn" id="adminToggle">+ Add Channel</button>
+      </div>
+    </aside>
+  </div>
+
+  <dialog id="addChannelModal" class="modal">
+    <form id="addChannelForm" method="dialog">
+      <h3>চ্যানেল যোগ করুন</h3>
+      <label>নাম *<input name="name" required /></label>
+      <label>Stream URL (.m3u8) *<input name="stream_url" required /></label>
+      <label>Backup URL<input name="backup_url" /></label>
+      <div class="form-row">
+        <label>Group
+          <select name="lang_group">
+            <option>Football</option><option>Cricket</option><option>Sports</option>
+            <option>Kids</option><option>Bangla</option><option>English</option>
+            <option>Hindi</option><option>Islamic</option>
+          </select>
+        </label>
+        <label>Country<input name="country" placeholder="BD" maxlength="3" /></label>
+      </div>
+      <label>Logo URL<input name="logo_url" /></label>
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" id="cancelAdd">বাতিল</button>
+        <button type="submit" class="btn-save">সংরক্ষণ</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
