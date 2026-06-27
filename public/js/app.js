@@ -3,8 +3,8 @@
 
   const MAX_FULL_RELOAD = 3;
   const RETRY_DELAY_MS = 1500;
-  const PRELOAD_MAX = 20;
-  const PRELOAD_CONCURRENCY = 5;
+  const PRELOAD_MAX = 8;
+  const PRELOAD_CONCURRENCY = 2;
 
   /** Menu order — special categories first */
   const PRIORITY_GROUPS = [
@@ -75,53 +75,155 @@
   let loadingTimer = null;
   let mainHlsHandlers = null;
   let resortTimer = null;
+  let bufferHealthTimer = null;
+  let preloadResumeTimer = null;
 
-  // ── Turbo HLS: minimum buffer = instant first frame ──
+  // ── HLS: smooth sustained playback (no 1-min stutter) ──
 
-  function getHlsConfig() {
-    const saver = bandwidthMode === 'low';
-    if (saver) {
+  const HLS_SHARED = {
+    enableWorker: true,
+    lowLatencyMode: false,
+    startFragPrefetch: true,
+    capLevelToPlayerSize: true,
+    manifestLoadingTimeOut: 12000,
+    manifestLoadingMaxRetry: 6,
+    levelLoadingTimeOut: 12000,
+    fragLoadingTimeOut: 18000,
+    fragLoadingMaxRetry: 10,
+    fragLoadingRetryDelay: 600,
+  };
+
+  function getHlsConfig(purpose = 'main') {
+    if (purpose === 'preload') {
       return {
-        enableWorker: true,
-        lowLatencyMode: false,
-        maxBufferLength: 30,
-        maxMaxBufferLength: 60,
-        startLevel: 0,
-        startFragPrefetch: true,
-        testBandwidth: true,
+        ...HLS_SHARED,
+        maxBufferLength: 6,
+        maxMaxBufferLength: 12,
+        backBufferLength: 0,
         liveSyncDurationCount: 2,
+        startLevel: 0,
+        testBandwidth: false,
       };
     }
+
+    if (bandwidthMode === 'low') {
+      return {
+        ...HLS_SHARED,
+        maxBufferLength: 25,
+        maxMaxBufferLength: 50,
+        backBufferLength: 15,
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 8,
+        maxLiveSyncPlaybackRate: 1.0,
+        startLevel: 0,
+        testBandwidth: true,
+      };
+    }
+
+    if (bandwidthMode === 'medium') {
+      return {
+        ...HLS_SHARED,
+        maxBufferLength: 40,
+        maxMaxBufferLength: 80,
+        backBufferLength: 25,
+        maxBufferSize: 45 * 1000 * 1000,
+        liveSyncDurationCount: 4,
+        liveMaxLatencyDurationCount: 12,
+        maxLiveSyncPlaybackRate: 1.0,
+        startLevel: -1,
+        testBandwidth: true,
+        abrBandWidthUpFactor: 0.55,
+      };
+    }
+
     return {
-      enableWorker: true,
-      lowLatencyMode: true,
-      backBufferLength: 3,
-      maxBufferLength: 4,
-      maxMaxBufferLength: 10,
-      maxBufferSize: 12 * 1000 * 1000,
-      maxBufferHole: 0.3,
-      highBufferWatchdogPeriod: 1,
-      nudgeOffset: 0.05,
-      nudgeMaxRetry: 12,
-      startFragPrefetch: true,
-      testBandwidth: false,
-      startLevel: 0,
-      capLevelToPlayerSize: true,
-      abrEwmaDefaultEstimate: 5000000,
-      abrBandWidthFactor: 0.95,
-      abrBandWidthUpFactor: 0.7,
-      initialLiveManifestSize: 1,
-      liveSyncDurationCount: 1,
-      liveMaxLatencyDurationCount: 3,
+      ...HLS_SHARED,
+      maxBufferLength: 50,
+      maxMaxBufferLength: 120,
+      backBufferLength: 30,
+      maxBufferSize: 70 * 1000 * 1000,
+      maxBufferHole: 0.5,
+      liveSyncDurationCount: 4,
+      liveMaxLatencyDurationCount: 16,
       liveDurationInfinity: true,
-      maxLiveSyncPlaybackRate: 1.3,
-      manifestLoadingTimeOut: 6000,
-      manifestLoadingMaxRetry: 4,
-      levelLoadingTimeOut: 6000,
-      fragLoadingTimeOut: 8000,
-      fragLoadingMaxRetry: 6,
-      fragLoadingRetryDelay: 400,
+      maxLiveSyncPlaybackRate: 1.0,
+      startLevel: -1,
+      testBandwidth: true,
+      abrEwmaDefaultEstimate: 4000000,
+      abrBandWidthFactor: 0.92,
+      abrBandWidthUpFactor: 0.45,
     };
+  }
+
+  function applySmoothBufferMode(hls) {
+    if (!hls) return;
+    const cfg = getHlsConfig('main');
+    Object.assign(hls.config, {
+      maxBufferLength: cfg.maxBufferLength,
+      maxMaxBufferLength: cfg.maxMaxBufferLength,
+      backBufferLength: cfg.backBufferLength,
+      liveSyncDurationCount: cfg.liveSyncDurationCount,
+      liveMaxLatencyDurationCount: cfg.liveMaxLatencyDurationCount,
+      maxLiveSyncPlaybackRate: 1.0,
+      lowLatencyMode: false,
+    });
+    hls.startLoad(-1);
+  }
+
+  function getBufferAhead() {
+    const v = els.video;
+    if (!v?.buffered?.length) return 0;
+    try {
+      return v.buffered.end(v.buffered.length - 1) - v.currentTime;
+    } catch {
+      return 0;
+    }
+  }
+
+  function freezeBackgroundPreloads(activeId) {
+    for (const [id, entry] of preloadPool) {
+      if (id !== activeId) {
+        try { entry.hls.stopLoad(); } catch { /* ignore */ }
+      }
+    }
+  }
+
+  function canRunBackgroundPreload() {
+    if (!playbackStarted || els.video.paused || !currentChannel) return true;
+    return getBufferAhead() > 18;
+  }
+
+  function schedulePreloadResume() {
+    clearTimeout(preloadResumeTimer);
+    preloadResumeTimer = setTimeout(() => {
+      if (canRunBackgroundPreload()) preloadAllVisible();
+    }, 25000);
+  }
+
+  function startBufferHealthWatch() {
+    clearInterval(bufferHealthTimer);
+    bufferHealthTimer = setInterval(() => {
+      if (!hlsInstance || !playbackStarted || els.video.paused) return;
+
+      const ahead = getBufferAhead();
+
+      if (ahead < 5) {
+        freezeBackgroundPreloads(currentChannel?.id);
+        hlsInstance.startLoad(-1);
+        if (ahead < 2 && hlsInstance.autoLevelEnabled && hlsInstance.currentLevel > 0) {
+          hlsInstance.nextLevel = Math.max(0, hlsInstance.currentLevel - 1);
+        }
+        if (ahead < 3) showStatus('Buffering...', 'loading');
+      } else if (ahead > 12) {
+        showStatus('LIVE', 'ok');
+        schedulePreloadResume();
+      }
+    }, 2000);
+  }
+
+  function stopBufferHealthWatch() {
+    clearInterval(bufferHealthTimer);
+    bufferHealthTimer = null;
   }
 
   // ── Channel buckets, dedupe & sort ──
@@ -359,7 +461,7 @@
     video.className = 'preload-video';
     document.body.appendChild(video);
 
-    const hls = new Hls({ ...getHlsConfig(), xhrSetup: buildXhrSetup(ch) });
+    const hls = new Hls({ ...getHlsConfig('preload'), xhrSetup: buildXhrSetup(ch) });
     const entry = {
       hls,
       video,
@@ -427,6 +529,7 @@
   }
 
   function drainPreloadQueue() {
+    if (!canRunBackgroundPreload()) return;
     while (preloadRunning < PRELOAD_CONCURRENCY && preloadQueue.length) {
       const ch = preloadQueue.shift();
       if (!ch || preloadPool.has(ch.id)) continue;
@@ -439,6 +542,7 @@
   }
 
   function preloadAllVisible() {
+    if (!canRunBackgroundPreload()) return;
     getFilteredChannels().slice(0, PRELOAD_MAX).forEach((ch) => schedulePreload(ch));
   }
 
@@ -603,11 +707,14 @@
       clearTimeout(loadingTimer);
       if (!playbackStarted) {
         playbackStarted = true;
+        applySmoothBufferMode(hls);
+        freezeBackgroundPreloads(currentChannel?.id);
         els.video.muted = false;
         els.overlay?.classList.add('hidden');
         els.video.play().catch(() => {});
         showStatus('LIVE', 'ok');
         updateQualityBadge();
+        startBufferHealthWatch();
       }
     };
 
@@ -659,6 +766,7 @@
       hls.destroy();
       if (hls === hlsInstance) hlsInstance = null;
     }
+    stopBufferHealthWatch();
   }
 
   function swapToPreloaded(cached) {
@@ -670,16 +778,20 @@
     hlsInstance = cached.hls;
     hlsInstance.detachMedia();
     hlsInstance.attachMedia(els.video);
+    applySmoothBufferMode(hlsInstance);
     attachHlsEvents(hlsInstance);
 
     if (resumeAt > 0.1) els.video.currentTime = resumeAt;
     els.video.muted = false;
     playbackStarted = true;
+    freezeBackgroundPreloads(currentChannel?.id);
     els.overlay?.classList.add('hidden');
     els.video.play().catch(() => {});
-    showStatus('INSTANT', 'ok');
+    showStatus('LIVE', 'ok');
     updateQualityBadge();
     lastProgressTime = Date.now();
+    startBufferHealthWatch();
+    schedulePreloadResume();
   }
 
   async function playChannel(ch) {
@@ -694,6 +806,8 @@
 
     updateNowPlaying(ch);
     renderGrid();
+    freezeBackgroundPreloads(ch.id);
+    stopBufferHealthWatch();
 
     const cached = preloadPool.get(ch.id);
     if (cached?.readyFlag) {
@@ -733,7 +847,7 @@
     showLoadingDelayed();
 
     if (Hls.isSupported()) {
-      hlsInstance = new Hls({ ...getHlsConfig(), xhrSetup: buildXhrSetup(currentChannel) });
+      hlsInstance = new Hls({ ...getHlsConfig('main'), xhrSetup: buildXhrSetup(currentChannel) });
       hlsInstance.loadSource(url);
       hlsInstance.attachMedia(els.video);
       attachHlsEvents(hlsInstance);
@@ -742,12 +856,16 @@
       clearInterval(stallTimer);
       stallTimer = setInterval(() => {
         if (!currentChannel || els.video.paused || !hlsInstance) return;
-        if (Date.now() - lastProgressTime > 8000) {
-          hlsInstance.recoverMediaError();
+        const ahead = getBufferAhead();
+        if (Date.now() - lastProgressTime > 6000 || ahead < 2) {
+          freezeBackgroundPreloads(currentChannel?.id);
           hlsInstance.startLoad(-1);
+          if (ahead < 2 && hlsInstance.autoLevelEnabled && hlsInstance.currentLevel > 0) {
+            hlsInstance.nextLevel = hlsInstance.currentLevel - 1;
+          }
           lastProgressTime = Date.now();
         }
-      }, 3000);
+      }, 2500);
     } else if (els.video.canPlayType('application/vnd.apple.mpegurl')) {
       els.video.src = url;
       els.video.onloadedmetadata = () => {
@@ -805,6 +923,17 @@
   els.bandwidthMode?.addEventListener('change', () => {
     bandwidthMode = els.bandwidthMode.value;
     if (currentChannel) playChannel(currentChannel);
+  });
+
+  els.video?.addEventListener('waiting', () => {
+    if (!playbackStarted) return;
+    freezeBackgroundPreloads(currentChannel?.id);
+    hlsInstance?.startLoad(-1);
+    showStatus('Buffering...', 'loading');
+  });
+
+  els.video?.addEventListener('playing', () => {
+    if (playbackStarted && getBufferAhead() > 5) showStatus('LIVE', 'ok');
   });
 
   let searchT;
