@@ -1019,3 +1019,56 @@ html, body {
   background: linear-gradient(135deg, #fbbf24, #e85d04);
   color: #1a1a1a;
 }
+
+.admin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.admin-field input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font-size: 0.8125rem;
+}
+
+/* Site legal footer */
+.site-legal {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px 20px 24px;
+  text-align: center;
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.legal-disclaimer {
+  margin: 0 0 8px;
+  max-width: 720px;
+  margin-inline: auto;
+}
+
+.legal-links {
+  margin: 0;
+}
+
+.legal-links a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.legal-links a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 900px) {
+  .site-legal {
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
+  }
+}

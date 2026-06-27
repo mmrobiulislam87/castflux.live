@@ -5,7 +5,9 @@ const { Readable } = require('stream');
 const { db, upsertChannels } = require('./lib/db');
 const { syncIptvOrg, syncFreeTv } = require('./lib/iptv-sync');
 const featuredSports = require('./lib/sports-channels');
+const cricketChannels = require('./lib/cricket-channels');
 const banglaChannels = require('./lib/bangla-channels');
+const { requireAdmin } = require('./lib/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -78,6 +80,11 @@ app.get('/api/sports', (_req, res) => {
     ORDER BY sort_order ASC
   `).all();
 
+  const cricket = db.prepare(`
+    SELECT * FROM channels WHERE is_active = 1 AND source = 'cricket'
+    ORDER BY sort_order ASC
+  `).all();
+
   const sports = db.prepare(`
     SELECT * FROM channels WHERE is_active = 1 AND category = 'Sports' AND source != 'featured'
     ORDER BY
@@ -98,7 +105,7 @@ app.get('/api/sports', (_req, res) => {
 
   const seen = new Set();
   const merged = [];
-  for (const ch of [...featured, ...sports, ...football]) {
+  for (const ch of [...featured, ...cricket, ...sports, ...football]) {
     if (!seen.has(ch.id)) {
       seen.add(ch.id);
       merged.push(ch);
@@ -113,7 +120,7 @@ app.get('/api/channels/:id', (req, res) => {
   res.json(row);
 });
 
-app.post('/api/channels', (req, res) => {
+app.post('/api/channels', requireAdmin, (req, res) => {
   const { name, category, country, logo_url, stream_url, backup_url, description, lang_group } = req.body;
   if (!name || !stream_url) {
     return res.status(400).json({ error: 'name and stream_url are required' });
@@ -134,7 +141,7 @@ app.post('/api/channels', (req, res) => {
   res.status(201).json(db.prepare('SELECT * FROM channels WHERE id = ?').get(result.lastInsertRowid));
 });
 
-app.delete('/api/channels/:id', (req, res) => {
+app.delete('/api/channels/:id', requireAdmin, (req, res) => {
   const result = db.prepare('UPDATE channels SET is_active = 0 WHERE id = ?').run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Channel not found' });
   res.json({ ok: true });
@@ -142,7 +149,7 @@ app.delete('/api/channels/:id', (req, res) => {
 
 // --- GitHub sync (iptv-org + Free-TV) ---
 
-app.post('/api/sync/iptv-org', async (req, res) => {
+app.post('/api/sync/iptv-org', requireAdmin, async (req, res) => {
   try {
     const { country, limit } = req.body || {};
     const result = await syncIptvOrg({
@@ -162,7 +169,7 @@ app.post('/api/sync/iptv-org', async (req, res) => {
   }
 });
 
-app.post('/api/sync/free-tv', async (req, res) => {
+app.post('/api/sync/free-tv', requireAdmin, async (req, res) => {
   try {
     const { limit } = req.body || {};
     const result = await syncFreeTv({ limit: limit ? Number(limit) : 250 });
@@ -179,7 +186,7 @@ app.post('/api/sync/free-tv', async (req, res) => {
   }
 });
 
-app.post('/api/sync/all', async (_req, res) => {
+app.post('/api/sync/all', requireAdmin, async (_req, res) => {
   try {
     const [freeTv, iptvOrg] = await Promise.all([
       syncFreeTv({ limit: 200 }),
@@ -282,6 +289,7 @@ app.get('*', (_req, res) => {
 
 async function bootstrap() {
   upsertChannels(featuredSports, 'featured', false);
+  upsertChannels(cricketChannels, 'cricket', false);
   upsertChannels(banglaChannels, 'bangla', false);
 
   const total = db.prepare('SELECT COUNT(*) AS n FROM channels WHERE is_active = 1').get().n;

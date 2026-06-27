@@ -1,0 +1,3 @@
+# Copy to .dev.vars for local wrangler dev, or set as Cloudflare Worker secret:
+# wrangler secret put SYNC_SECRET
+SYNC_SECRET=change-me-to-a-long-random-string

@@ -1,7 +1,9 @@
 import { countActiveChannels, upsertChannels } from './db.js';
 import { syncFreeTv, syncIptvOrg } from './lib/iptv-sync.js';
 import featuredSports from './lib/sports-channels.js';
+import cricketChannels from './lib/cricket-channels.js';
 import banglaChannels from './lib/bangla-channels.js';
+import { getAdminSecret, isAdminAuthorized, adminDeniedResponse } from './lib/auth.js';
 
 const DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -40,6 +42,7 @@ async function ensureBootstrap(env) {
 
 async function bootstrap(env) {
   await upsertChannels(env.DB, featuredSports, 'featured', false);
+  await upsertChannels(env.DB, cricketChannels, 'cricket', false);
   await upsertChannels(env.DB, banglaChannels, 'bangla', false);
 
   const total = await countActiveChannels(env.DB);
@@ -114,6 +117,11 @@ async function handleSports(env) {
     ORDER BY sort_order ASC
   `).all();
 
+  const cricket = await env.DB.prepare(`
+    SELECT * FROM channels WHERE is_active = 1 AND source = 'cricket'
+    ORDER BY sort_order ASC
+  `).all();
+
   const sports = await env.DB.prepare(`
     SELECT * FROM channels WHERE is_active = 1 AND category = 'Sports' AND source != 'featured'
     ORDER BY
@@ -136,6 +144,7 @@ async function handleSports(env) {
   const merged = [];
   const lists = [
     featured.results ?? featured,
+    cricket.results ?? cricket,
     sports.results ?? sports,
     football.results ?? football,
   ];
@@ -158,7 +167,16 @@ async function handleChannelById(id, env) {
   return json(row);
 }
 
+function requireAdmin(req, env) {
+  const secret = getAdminSecret(env);
+  if (!secret) return adminDeniedResponse();
+  if (!isAdminAuthorized(req, secret)) return adminDeniedResponse();
+  return null;
+}
+
 async function handleCreateChannel(req, env) {
+  const denied = requireAdmin(req, env);
+  if (denied) return denied;
   const body = await req.json();
   const { name, category, country, logo_url, stream_url, backup_url, description, lang_group } = body;
   if (!name || !stream_url) return json({ error: 'name and stream_url are required' }, 400);
@@ -182,7 +200,9 @@ async function handleCreateChannel(req, env) {
   return json(row, 201);
 }
 
-async function handleDeleteChannel(id, env) {
+async function handleDeleteChannel(id, req, env) {
+  const denied = requireAdmin(req, env);
+  if (denied) return denied;
   const result = await env.DB.prepare('UPDATE channels SET is_active = 0 WHERE id = ?')
     .bind(Number(id)).run();
   if (!result.meta.changes) return json({ error: 'Channel not found' }, 404);
@@ -190,6 +210,8 @@ async function handleDeleteChannel(id, env) {
 }
 
 async function handleSyncIptvOrg(req, env) {
+  const denied = requireAdmin(req, env);
+  if (denied) return denied;
   const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
   const result = await syncIptvOrg({
     country: body.country || undefined,
@@ -206,6 +228,8 @@ async function handleSyncIptvOrg(req, env) {
 }
 
 async function handleSyncFreeTv(req, env) {
+  const denied = requireAdmin(req, env);
+  if (denied) return denied;
   const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
   const result = await syncFreeTv({ limit: body.limit ? Number(body.limit) : 250 });
   const stats = await upsertChannels(env.DB, result.channels, 'free-tv', true);
@@ -218,7 +242,11 @@ async function handleSyncFreeTv(req, env) {
   });
 }
 
-async function handleSyncAll(env) {
+async function handleSyncAll(req, env) {
+  if (req) {
+    const denied = requireAdmin(req, env);
+    if (denied) return denied;
+  }
   const [freeTv, iptvOrg] = await Promise.all([
     syncFreeTv({ limit: 200 }),
     syncIptvOrg({ limit: 300 }),
@@ -323,11 +351,11 @@ async function handleApi(req, env) {
     if (path === '/api/proxy' && req.method === 'GET') return handleProxy(req);
     if (path === '/api/sync/iptv-org' && req.method === 'POST') return handleSyncIptvOrg(req, env);
     if (path === '/api/sync/free-tv' && req.method === 'POST') return handleSyncFreeTv(req, env);
-    if (path === '/api/sync/all' && req.method === 'POST') return handleSyncAll(env);
+    if (path === '/api/sync/all' && req.method === 'POST') return handleSyncAll(req, env);
 
     const channelMatch = path.match(/^\/api\/channels\/(\d+)$/);
     if (channelMatch && req.method === 'GET') return handleChannelById(channelMatch[1], env);
-    if (channelMatch && req.method === 'DELETE') return handleDeleteChannel(channelMatch[1], env);
+    if (channelMatch && req.method === 'DELETE') return handleDeleteChannel(channelMatch[1], req, env);
 
     return json({ error: 'Not found' }, 404);
   } catch (err) {
@@ -348,7 +376,7 @@ export default {
 
   async scheduled(_event, env) {
     try {
-      await handleSyncAll(env);
+      await handleSyncAll(null, env);
     } catch {
       /* cron sync is best-effort */
     }

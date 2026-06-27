@@ -2,6 +2,8 @@
 
 Localhost + Cloudflare Workers Live TV viewer with legitimate free HLS streams.
 
+📍 **[Product Roadmap → ROADMAP.md](./ROADMAP.md)**
+
 ## Features
 
 - HLS.js turbo player with instant preload pool
@@ -105,11 +107,24 @@ Live URL: `https://castflux-live.<your-subdomain>.workers.dev`
 
 ## After first deploy
 
-1. সাইট খুলুন
-2. **Sync** বাটন চাপুন — GitHub থেকে চ্যানেল লোড হবে
-3. Football / Cricket ট্যাবে ⚡ instant চ্যানেল দেখুন
+1. **SYNC_SECRET সেট করুন** (admin API সুরক্ষার জন্য):
+   ```bash
+   npx wrangler secret put SYNC_SECRET
+   ```
+2. সাইট খুলুন → **Settings (⚙)** → Admin token ফিল্ডে secret দিন
+3. Settings থেকে **Sync channels** চাপুন — GitHub থেকে চ্যানেল লোড হবে
+4. Football / Cricket ট্যাবে ⚡ instant চ্যানেল দেখুন
 
-Cron: প্রতিদিন সকাল ৬টায় auto-sync (`0 6 * * *`)
+Cron: প্রতিদিন সকাল ৬টায় auto-sync (`0 6 * * *`) — token ছাড়াই চলে
+
+Local dev: `.dev.vars.example` কপি করে `.dev.vars` বানান, অথবা `SYNC_SECRET=... npm start`
+
+---
+
+## Legal
+
+CastFlux Live শুধু publicly available HLS stream link করে। কোনো content host করে না।
+Site footer-এ disclaimer ও DMCA contact (`dmca@castflux.live`) আছে।
 
 ---
 
@@ -131,7 +146,7 @@ Cron: প্রতিদিন সকাল ৬টায় auto-sync (`0 6 * * 
 | Problem | Fix |
 |---------|-----|
 | `database_id` error | Step 2–3 follow করুন |
-| No channels | Sync বাটন চাপুন |
+| No channels | Settings → Admin token → Sync channels |
 | Stream won't play | Stream geo-blocked হতে পারে — অন্য চ্যানেল চেষ্টা করুন |
 | Deploy fails on GitHub | `wrangler.jsonc`-এ সঠিক `database_id` আছে কিনা দেখুন |
 

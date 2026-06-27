@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/style.css?v=7" />
+  <link rel="stylesheet" href="/css/style.css?v=8" />
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
 </head>
 <body>
@@ -70,7 +70,6 @@
       <footer class="guide-footer">
         <span class="channel-count" id="railCount"></span>
         <div class="footer-actions">
-          <button type="button" class="foot-btn" id="syncBtn" title="GitHub Sync">⟳</button>
           <button type="button" class="foot-btn" id="settingsBtn" title="Settings">⚙</button>
         </div>
       </footer>
@@ -97,10 +96,27 @@
           <input type="checkbox" id="audioOnlyToggle" />
         </label>
         <p class="settings-hint">⌨️ ↑↓ volume · ←→ channel · F fullscreen · M mute · S favorite</p>
+        <label class="admin-field">Admin token (SYNC_SECRET)
+          <input type="password" id="adminTokenInput" placeholder="Required for sync & add channel" autocomplete="off" />
+        </label>
+        <button type="button" class="drawer-btn" id="syncBtn" title="GitHub Sync">⟳ Sync channels</button>
         <button type="button" class="drawer-btn" id="adminToggle">+ Add Channel</button>
       </div>
     </aside>
   </div>
+
+  <footer class="site-legal">
+    <p class="legal-disclaimer">
+      <strong>Disclaimer:</strong> CastFlux Live is a media player that links to publicly available HLS streams.
+      We do not host, upload, or distribute any video content. All streams belong to their respective owners.
+      Availability may vary by region and is subject to change.
+    </p>
+    <p class="legal-links">
+      <a href="mailto:dmca@castflux.live">DMCA / Copyright</a>
+      ·
+      <span>© CastFlux Live</span>
+    </p>
+  </footer>
 
   <dialog id="addChannelModal" class="modal">
     <form id="addChannelForm" method="dialog">
@@ -126,6 +142,6 @@
     </form>
   </dialog>
 
-  <script src="/js/app.js?v=8"></script>
+  <script src="/js/app.js?v=9"></script>
 </body>
 </html>

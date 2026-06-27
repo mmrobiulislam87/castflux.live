@@ -59,6 +59,7 @@
   let manualQuality = -1;
   let ambientRaf = null;
   let gestureTouch = null;
+  let adminToken = '';
 
   const els = {
     channelList: document.getElementById('channelList'),
@@ -78,6 +79,7 @@
     settingsBtn: document.getElementById('settingsBtn'),
     settingsPanel: document.getElementById('settingsPanel'),
     adminToggle: document.getElementById('adminToggle'),
+    adminTokenInput: document.getElementById('adminTokenInput'),
     addModal: document.getElementById('addChannelModal'),
     addForm: document.getElementById('addChannelForm'),
     cancelAdd: document.getElementById('cancelAdd'),
@@ -222,7 +224,7 @@
   /** Featured / fast channels for first-visit instant play */
   function getWelcomeCandidates() {
     const featured = allChannels
-      .filter((c) => c.source === 'featured')
+      .filter((c) => c.source === 'featured' || c.source === 'cricket')
       .sort((a, b) => (a.sort_order || 99) - (b.sort_order || 99));
     if (featured.length) return featured.slice(0, WELCOME_PREFETCH);
 
@@ -428,7 +430,7 @@
   }
 
   function isFastChannel(ch) {
-    return ch.source === 'featured' || ch.source === 'bangla';
+    return ch.source === 'featured' || ch.source === 'bangla' || ch.source === 'cricket';
   }
 
   function isPreloaded(ch) {
@@ -517,8 +519,10 @@
       audioOnlyMode = !!prefs.audioOnly;
       ambientEnabled = prefs.ambient !== false;
       manualQuality = prefs.manualQuality ?? -1;
+      adminToken = prefs.adminToken || '';
       if (els.ambientToggle) els.ambientToggle.checked = ambientEnabled;
       if (els.audioOnlyToggle) els.audioOnlyToggle.checked = audioOnlyMode;
+      if (els.adminTokenInput) els.adminTokenInput.value = adminToken;
       if (els.manualQuality && manualQuality >= 0) {
         els.manualQuality.value = String(manualQuality);
       }
@@ -535,7 +539,17 @@
       audioOnly: audioOnlyMode,
       ambient: ambientEnabled,
       manualQuality,
+      adminToken,
     }));
+  }
+
+  function adminHeaders(extra = {}) {
+    if (!adminToken) return extra;
+    return {
+      ...extra,
+      'X-Admin-Token': adminToken,
+      Authorization: `Bearer ${adminToken}`,
+    };
   }
 
   function saveFavorites() {
@@ -1359,14 +1373,19 @@
   }
 
   async function syncAll() {
+    if (!adminToken) {
+      showStatus('Admin token required', 'error');
+      els.settingsPanel?.classList.add('open');
+      return;
+    }
     els.syncBtn.disabled = true;
     try {
-      await fetchJSON('/api/sync/all', { method: 'POST' });
+      await fetchJSON('/api/sync/all', { method: 'POST', headers: adminHeaders({ 'Content-Type': 'application/json' }) });
       await loadAll();
       renderGrid();
       preloadAllVisible();
       showStatus('Synced', 'ok');
-    } catch { showStatus('Sync failed', 'error'); }
+    } catch { showStatus('Sync failed — check token', 'error'); }
     finally { els.syncBtn.disabled = false; }
   }
 
@@ -1385,6 +1404,11 @@
       els.guideTabs.scrollLeft += e.deltaY;
     }
   }, { passive: false });
+
+  els.adminTokenInput?.addEventListener('change', () => {
+    adminToken = els.adminTokenInput.value.trim();
+    savePrefs();
+  });
 
   els.syncBtn?.addEventListener('click', syncAll);
   els.settingsBtn?.addEventListener('click', () => els.settingsPanel?.classList.toggle('open'));
@@ -1486,13 +1510,18 @@
     const body = Object.fromEntries(new FormData(els.addForm).entries());
     body.category = body.lang_group || 'General';
     try {
-      const res = await fetch('/api/channels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!res.ok) throw new Error();
+      const res = await fetch('/api/channels', {
+        method: 'POST',
+        headers: adminHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body),
+      });
+      if (res.status === 401) throw new Error('unauthorized');
+      if (!res.ok) throw new Error('failed');
       els.addModal.close();
       els.addForm.reset();
       await loadAll();
       renderGrid();
-    } catch { alert('Save failed'); }
+    } catch { alert('Save failed — check admin token in Settings'); }
   });
 
   async function init() {
