@@ -871,6 +871,38 @@ html, body {
 .pt-btn:hover { background: rgba(0, 0, 0, 0.75); }
 .pt-btn.active { background: var(--accent-soft); border-color: var(--accent); color: #ffd699; }
 
+/* Fullscreen — bottom-right on mobile (iOS Safari), top-right on desktop */
+.fs-btn {
+  position: absolute;
+  z-index: 6;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  bottom: 52px;
+  right: 12px;
+  transition: background 0.2s, transform 0.15s;
+}
+
+.fs-btn:active { transform: scale(0.94); background: rgba(232, 93, 4, 0.75); }
+
+@media (min-width: 901px) {
+  .fs-btn {
+    top: 14px;
+    right: 72px;
+    bottom: auto;
+    width: 38px;
+    height: 38px;
+    font-size: 1.1rem;
+  }
+}
+
 .gesture-hint {
   position: absolute;
   top: 50%;

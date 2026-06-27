@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/style.css?v=6" />
+  <link rel="stylesheet" href="/css/style.css?v=7" />
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
 </head>
 <body>
@@ -22,7 +22,7 @@
     <section class="player-panel">
       <div class="player-frame" id="playerFrame">
         <div class="ambient-glow" id="ambientGlow" aria-hidden="true"></div>
-        <video id="videoPlayer" controls playsinline autoplay muted preload="auto"></video>
+        <video id="videoPlayer" controls playsinline webkit-playsinline x-webkit-airplay="allow" autoplay muted preload="auto"></video>
 
         <div class="player-overlay" id="playerOverlay">
           <div class="overlay-msg">
@@ -38,8 +38,8 @@
         <div class="player-toolbar">
           <button type="button" class="pt-btn" id="favoriteBtn" title="Favorite (S)">☆</button>
           <button type="button" class="pt-btn" id="audioOnlyBtn" title="Audio only">🎧</button>
-          <button type="button" class="pt-btn" id="fullscreenBtn" title="Fullscreen (F)">⛶</button>
         </div>
+        <button type="button" class="fs-btn" id="fullscreenBtn" title="Fullscreen" aria-label="Fullscreen">⛶</button>
 
         <div class="player-info">
           <span class="live-badge"><i></i> LIVE</span>
@@ -126,6 +126,6 @@
     </form>
   </dialog>
 
-  <script src="/js/app.js?v=7"></script>
+  <script src="/js/app.js?v=8"></script>
 </body>
 </html>

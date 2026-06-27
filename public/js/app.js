@@ -696,10 +696,51 @@
     }
   }
 
-  function toggleFullscreen() {
-    const target = els.playerFrame || els.video;
+  function isFullscreenActive() {
+    return !!(document.fullscreenElement || els.video?.webkitDisplayingFullscreen);
+  }
+
+  function enterFullscreen() {
+    const v = els.video;
+    if (!v) return;
+
+    /* iPhone/iPad Safari — only webkitEnterFullscreen works on <video> */
+    if (typeof v.webkitEnterFullscreen === 'function') {
+      try {
+        v.webkitEnterFullscreen();
+      } catch {
+        showStatus('Tap ⛶ for fullscreen', 'ok');
+      }
+      return;
+    }
+
+    if (typeof v.webkitSetPresentationMode === 'function') {
+      v.webkitSetPresentationMode('fullscreen');
+      return;
+    }
+
+    if (v.requestFullscreen) {
+      v.requestFullscreen().catch(() => {
+        els.playerFrame?.requestFullscreen?.().catch(() => {});
+      });
+      return;
+    }
+
+    els.playerFrame?.requestFullscreen?.().catch(() => {});
+  }
+
+  function exitFullscreen() {
+    const v = els.video;
+    if (v?.webkitDisplayingFullscreen && typeof v.webkitExitFullscreen === 'function') {
+      v.webkitExitFullscreen();
+      return;
+    }
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    else target.requestFullscreen?.().catch(() => {});
+  }
+
+  function toggleFullscreen() {
+    if (isFullscreenActive()) exitFullscreen();
+    else enterFullscreen();
   }
 
   function setupPlayerGestures() {
@@ -1367,7 +1408,22 @@
     }
   });
 
-  els.fullscreenBtn?.addEventListener('click', () => toggleFullscreen());
+  els.fullscreenBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleFullscreen();
+  });
+
+  /* Double-tap video → fullscreen on mobile */
+  let lastVideoTap = 0;
+  els.video?.addEventListener('touchend', (e) => {
+    const now = Date.now();
+    if (now - lastVideoTap < 320) {
+      e.preventDefault();
+      enterFullscreen();
+    }
+    lastVideoTap = now;
+  });
 
   els.audioOnlyBtn?.addEventListener('click', () => {
     audioOnlyMode = !audioOnlyMode;
