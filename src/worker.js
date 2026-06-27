@@ -12,10 +12,13 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+/** Edge cache — millions of visitors share cached channel lists, not D1 per hit */
+const API_CACHE = 'public, max-age=120, stale-while-revalidate=600';
+
 let bootstrapPromise = null;
 
-function json(data, status = 200) {
-  return Response.json(data, { status, headers: CORS });
+function json(data, status = 200, extraHeaders = {}) {
+  return Response.json(data, { status, headers: { ...CORS, ...extraHeaders } });
 }
 
 function isManifest(url, contentType) {
@@ -80,7 +83,7 @@ async function handleChannels(req, env) {
   sql += ' ORDER BY sort_order ASC, name ASC';
   const stmt = env.DB.prepare(sql);
   const rows = params.length ? await stmt.bind(...params).all() : await stmt.all();
-  return json(rows.results ?? rows);
+  return json(rows.results ?? rows, 200, { 'Cache-Control': API_CACHE });
 }
 
 async function handleCategories(env) {
@@ -90,7 +93,7 @@ async function handleCategories(env) {
     FROM channels WHERE is_active = 1
     GROUP BY category ORDER BY category
   `).all();
-  return json(rows.results ?? rows);
+  return json(rows.results ?? rows, 200, { 'Cache-Control': API_CACHE });
 }
 
 async function handleCountries(env) {
@@ -100,7 +103,7 @@ async function handleCountries(env) {
     FROM channels WHERE is_active = 1 AND country IS NOT NULL
     GROUP BY country ORDER BY count DESC, country
   `).all();
-  return json(rows.results ?? rows);
+  return json(rows.results ?? rows, 200, { 'Cache-Control': API_CACHE });
 }
 
 async function handleSports(env) {
@@ -144,7 +147,7 @@ async function handleSports(env) {
       }
     }
   }
-  return json(merged);
+  return json(merged, 200, { 'Cache-Control': API_CACHE });
 }
 
 async function handleChannelById(id, env) {

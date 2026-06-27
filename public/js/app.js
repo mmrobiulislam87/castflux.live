@@ -5,6 +5,8 @@
   const RETRY_DELAY_MS = 1500;
   const PRELOAD_MAX = 8;
   const PRELOAD_CONCURRENCY = 2;
+  const WELCOME_PREFETCH = 3;
+  const WELCOME_WAIT_MS = 8000;
 
   /** Menu order — special categories first */
   const PRIORITY_GROUPS = [
@@ -45,6 +47,7 @@
   let stallTimer = null;
   let lastProgressTime = 0;
   let playbackStarted = false;
+  let welcomeAutoplay = false;
 
   const els = {
     channelList: document.getElementById('channelList'),
@@ -186,6 +189,65 @@
         try { entry.hls.stopLoad(); } catch { /* ignore */ }
       }
     }
+  }
+
+  function tryUnmute() {
+    if (!els.video?.muted) return;
+    els.video.muted = false;
+    els.video.play().catch(() => { els.video.muted = true; });
+  }
+
+  /** Featured / fast channels for first-visit instant play */
+  function getWelcomeCandidates() {
+    const featured = allChannels
+      .filter((c) => c.source === 'featured')
+      .sort((a, b) => (a.sort_order || 99) - (b.sort_order || 99));
+    if (featured.length) return featured.slice(0, WELCOME_PREFETCH);
+
+    for (const bucket of ['Football', 'Cricket', 'Sports', 'Bangla']) {
+      const list = allChannels.filter((c) => c._bucket === bucket);
+      if (!list.length) continue;
+      const prefer = list.find((c) => c.source === 'bangla') || list[0];
+      const rest = list.filter((c) => c.id !== prefer.id);
+      return [prefer, ...rest].slice(0, WELCOME_PREFETCH);
+    }
+    return allChannels.slice(0, WELCOME_PREFETCH);
+  }
+
+  async function prefetchWelcomeChannels(candidates) {
+    if (!Hls.isSupported() || !candidates.length) return;
+    await Promise.all(candidates.map((ch) => doPrefetch(ch).catch(() => {})));
+  }
+
+  function pickFastestWelcome(candidates) {
+    const ready = candidates.find((c) => preloadPool.get(c.id)?.readyFlag);
+    if (ready) return Promise.resolve(ready);
+
+    return new Promise((resolve) => {
+      const deadline = Date.now() + WELCOME_WAIT_MS;
+      const tick = () => {
+        const found = candidates.find((c) => preloadPool.get(c.id)?.readyFlag);
+        if (found) return resolve(found);
+        if (Date.now() >= deadline) return resolve(candidates[0]);
+        setTimeout(tick, 250);
+      };
+      tick();
+    });
+  }
+
+  async function startWelcomePlayback() {
+    const candidates = getWelcomeCandidates();
+    if (!candidates.length) return;
+
+    welcomeAutoplay = true;
+    els.video.muted = true;
+    els.channelName.textContent = candidates[0].name;
+    els.channelDesc.textContent = '⚡ লাইভ চ্যানেল চালু হচ্ছে...';
+    showStatus('Connecting...', 'loading');
+
+    await prefetchWelcomeChannels(candidates);
+    const best = await pickFastestWelcome(candidates);
+    if (best) playChannel(best);
   }
 
   function canRunBackgroundPreload() {
@@ -624,7 +686,11 @@
       tile.addEventListener('mouseenter', () => prefetchUrgent(ch));
       tile.addEventListener('mousedown', () => prefetchUrgent(ch));
       tile.addEventListener('touchstart', () => prefetchUrgent(ch), { passive: true });
-      tile.addEventListener('click', () => playChannel(ch));
+      tile.addEventListener('click', () => {
+        welcomeAutoplay = false;
+        tryUnmute();
+        playChannel(ch);
+      });
     });
 
     preloadAllVisible();
@@ -663,7 +729,7 @@
     });
   }
 
-  function setActiveFilter(filter) {
+  function setActiveFilter(filter, { skipPreload = false } = {}) {
     activeFilter = filter;
     els.guideTabs?.querySelectorAll('.guide-tab').forEach((t) => {
       const match = t.dataset.type === filter.type && t.dataset.value === filter.value;
@@ -671,7 +737,7 @@
     });
     scrollActiveTabIntoView();
     renderGrid();
-    preloadAllVisible();
+    if (!skipPreload) preloadAllVisible();
   }
 
   function updateNowPlaying(ch) {
@@ -709,10 +775,14 @@
         playbackStarted = true;
         applySmoothBufferMode(hls);
         freezeBackgroundPreloads(currentChannel?.id);
-        els.video.muted = false;
         els.overlay?.classList.add('hidden');
         els.video.play().catch(() => {});
-        showStatus('LIVE', 'ok');
+        if (welcomeAutoplay) {
+          showStatus('LIVE — 🔊 শব্দের জন্য ক্লিক করুন', 'ok');
+        } else {
+          els.video.muted = false;
+          showStatus('LIVE', 'ok');
+        }
         updateQualityBadge();
         startBufferHealthWatch();
       }
@@ -782,12 +852,12 @@
     attachHlsEvents(hlsInstance);
 
     if (resumeAt > 0.1) els.video.currentTime = resumeAt;
-    els.video.muted = false;
+    if (!welcomeAutoplay) els.video.muted = false;
     playbackStarted = true;
     freezeBackgroundPreloads(currentChannel?.id);
     els.overlay?.classList.add('hidden');
     els.video.play().catch(() => {});
-    showStatus('LIVE', 'ok');
+    showStatus(welcomeAutoplay ? 'LIVE — 🔊 শব্দের জন্য ক্লিক করুন' : 'LIVE', 'ok');
     updateQualityBadge();
     lastProgressTime = Date.now();
     startBufferHealthWatch();
@@ -933,8 +1003,16 @@
   });
 
   els.video?.addEventListener('playing', () => {
-    if (playbackStarted && getBufferAhead() > 5) showStatus('LIVE', 'ok');
+    if (playbackStarted && getBufferAhead() > 5 && !welcomeAutoplay) showStatus('LIVE', 'ok');
   });
+
+  document.addEventListener('click', () => {
+    if (welcomeAutoplay && playbackStarted) {
+      welcomeAutoplay = false;
+      tryUnmute();
+      showStatus('LIVE', 'ok');
+    }
+  }, { once: true });
 
   let searchT;
   els.searchInput?.addEventListener('input', () => {
@@ -969,13 +1047,8 @@
           break;
         }
       }
-      setActiveFilter(startFilter);
-      const first = getFilteredChannels()[0];
-      if (first) {
-        await doPrefetch(first);
-        preloadAllVisible();
-        playChannel(first);
-      }
+      setActiveFilter(startFilter, { skipPreload: true });
+      await startWelcomePlayback();
     } catch {
       els.channelList.innerHTML = '<div class="empty-state">npm start চালান</div>';
     }
