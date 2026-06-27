@@ -84,9 +84,12 @@ html, body {
   overflow: hidden;
   background: #000;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  isolation: isolate;
 }
 
 #videoPlayer {
+  position: relative;
+  z-index: 2;
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -96,6 +99,7 @@ html, body {
 .player-overlay {
   position: absolute;
   inset: 0;
+  z-index: 4;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -104,7 +108,10 @@ html, body {
   pointer-events: none;
 }
 
-.player-overlay.hidden { opacity: 0; }
+.player-overlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+}
 
 .overlay-msg {
   text-align: center;
@@ -137,6 +144,7 @@ html, body {
   top: 14px;
   left: 50%;
   transform: translateX(-50%);
+  z-index: 5;
   padding: 6px 16px;
   border-radius: 20px;
   font-size: 0.75rem;
@@ -156,6 +164,7 @@ html, body {
   position: absolute;
   top: 14px;
   right: 14px;
+  z-index: 5;
   padding: 4px 10px;
   border-radius: 6px;
   font-size: 0.6875rem;
@@ -173,6 +182,7 @@ html, body {
   bottom: 0;
   left: 0;
   right: 0;
+  z-index: 3;
   padding: 48px 20px 16px;
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
   pointer-events: none;
@@ -800,19 +810,22 @@ html, body {
 
 .ambient-glow {
   position: absolute;
-  inset: -20%;
-  z-index: 0;
+  inset: 0;
+  z-index: 1;
   pointer-events: none;
   opacity: 0;
   transition: opacity 1.2s ease;
-  background: radial-gradient(ellipse at center, var(--ambient-color, rgba(232, 93, 4, 0.35)) 0%, transparent 70%);
-  filter: blur(40px);
+  background: radial-gradient(ellipse at center, var(--ambient-color, rgba(232, 93, 4, 0.25)) 0%, transparent 75%);
+  filter: blur(48px);
 }
 
-.player-frame.ambient-on .ambient-glow { opacity: 1; }
+/* Glow stays BEHIND video — only box-shadow + page bg tint, no haze on picture */
+.player-frame.ambient-on .ambient-glow { opacity: 0.5; }
 
 .player-frame.ambient-on {
-  box-shadow: 0 0 80px var(--ambient-color, rgba(232, 93, 4, 0.25)), 0 20px 60px rgba(0, 0, 0, 0.55);
+  box-shadow:
+    0 0 48px color-mix(in srgb, var(--ambient-color, rgba(232, 93, 4, 0.4)) 40%, transparent),
+    0 20px 60px rgba(0, 0, 0, 0.55);
 }
 
 .player-frame.audio-only #videoPlayer {
