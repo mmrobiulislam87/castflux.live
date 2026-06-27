@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "castflux-live",
+  "name": "castfluxlive",
   "main": "src/worker.js",
   "compatibility_date": "2025-06-27",
   "compatibility_flags": ["nodejs_compat"],
